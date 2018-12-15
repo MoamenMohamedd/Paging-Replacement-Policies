@@ -3,151 +3,293 @@
 #include <stdlib.h>
 #include <stdbool.h>
 
+#include "main.h"
 
-void fifoPolicy(int *pageReferences , int numFrames, int *allocationArray);
 
-void lruPolicy(int *pageReferences , int numFrames, int *allocationArray);
+int main(){
 
-void clockPolicy(int *pageReferences , int numFrames, int *allocationArray);
-
-bool pageExists(int pageReference, int *allocationArray, int numAllocatedFrames);
-
-void printOutput(bool pageFault, int pageReference, int *allocationArray, int numAllocatedFrames) ;
-
-int main() {
-
-    int numFramesAllocatedToProcess;
+    int residentSetSize;
     char pageReplacementPolicy[10];
 
-    scanf("%d", &numFramesAllocatedToProcess);
+    //read number of available frames for this process
+    scanf("%d", &residentSetSize);
+
+    //read which page replacement policy we should use
     scanf("%s", pageReplacementPolicy);
 
+    //read all page references
     int size = 10;
-    int *pageReferences = (int *) malloc( size * sizeof(int));
-    int i = 0 , pageRef;
-    while(1){
-        scanf("%d" ,&pageRef);
+    int *pageReferences = (int *)malloc(size * sizeof(int));
+    int i = 0, pageRef;
+    while (1){
+        scanf("%d", &pageRef);
 
-        if(i == size){
+        if (i == size){
             size += 10;
-            pageReferences = (int*)realloc(pageReferences , size * sizeof(int));
+            pageReferences = (int *)realloc(pageReferences, size * sizeof(int));
         }
 
-        if(pageRef == -1){
+        if (pageRef == -1){
             pageReferences[i] = pageRef;
             break;
         }
-            
+
         pageReferences[i] = pageRef;
 
         i++;
     }
-        
-
-    int *allocatedFrames = (int *) malloc(numFramesAllocatedToProcess * sizeof(int));
-    for (int i = 0; i < numFramesAllocatedToProcess; i++) {
-        allocatedFrames[i] = -1; //-1 for an empty frame
+    
+    //initialize resident set for the process
+    int* residentSet = (int*)malloc(residentSetSize * sizeof(int));
+    for (int i = 0; i < residentSetSize; i++){
+        residentSet[i] = -1; //-1 for an empty frame
     }
 
+    //run the policy
     if (strcmp(pageReplacementPolicy, "FIFO") == 0)
-        fifoPolicy(pageReferences , numFramesAllocatedToProcess, allocatedFrames);
+        fifoPolicy(pageReferences, residentSet, residentSetSize);
     else if (strcmp(pageReplacementPolicy, "LRU") == 0)
-        lruPolicy(pageReferences , numFramesAllocatedToProcess, allocatedFrames);
+        lruPolicy(pageReferences, residentSet, residentSetSize);
     else if (strcmp(pageReplacementPolicy, "CLOCK") == 0)
-        clockPolicy(pageReferences , numFramesAllocatedToProcess, allocatedFrames);
+        clockPolicy(pageReferences, residentSet, residentSetSize);
+    
 
-
-    free(allocatedFrames);
+    free(residentSet);
     free(pageReferences);
 
     return 0;
 }
 
-void clockPolicy(int *pageReferences , int frames, int *allocationArray) {
-
+void clockPolicy(int *pageReferences, int *residentSet, int residentSetSize){
 }
 
-void lruPolicy(int *pageReferences , int frames, int *allocationArray) {
-
-}
-
-void fifoPolicy(int *pageReferences , int numAllocatedFrames, int *allocationArray) {
-    puts("Policy = FIFO");
+void lruPolicy(int *pageReferences, int *residentSet, int residentSetSize){
+    puts("Replacement Policy = LRU");
     puts("-------------------------------------");
     puts("Page\tContent of Frames");
     puts("----\t-----------------");
 
-    int nextFrameIndex = 0 , numPageFaults = 0;
+    //count number of page faults excluding ones when resident set is not yet full
+    int numPageFaults = 0; 
 
-    int i = 0;
-    while (pageReferences[i] != -1) { // not end of input
+    //store time when pages are used
+    //each frame is associated with a time that is updated every time 
+    //the contained page is used or newly allocated
+    clock_t recentlyUsed[residentSetSize];
 
-    
+    //serve page references
+    int i = 0 , numFreeFrames = residentSetSize;
 
-            if (pageExists(pageReferences[i], allocationArray, numAllocatedFrames)) {
+    //page faults when process pages are first loaded don't count
+    while(pageReferences[i] != -1 && numFreeFrames != 0){
 
-                printOutput(false , pageReferences[i] , allocationArray , numAllocatedFrames);
+        //checks if the page exists in resident set if so return it's location
+        int location = getPageResidentSetIndex(pageReferences[i], residentSet, residentSetSize);
+       
+        //page exist
+        if(location != -1){
+            printOutput(false, pageReferences[i], residentSet, residentSetSize);
 
-            } else {
+            //update time when it is used
+            recentlyUsed[location] = clock();
+        }else{
+            //page doesn't exist
+            //allocate page to free frame but don't increase fault count
+            int allocatedLocation = loadIfNotFull(pageReferences[i] , residentSet , residentSetSize);
+            
+            //if page is allocated a free frame
+            if(allocatedLocation != -1){
+                //decrease free frames
+                numFreeFrames--;
 
-                if(allocationArray[nextFrameIndex] == -1){
-                    //count page faults only after all the frames are allocated
-                    //get page from virtual memory
-                    //allocate page to frame
-                    allocationArray[nextFrameIndex] = pageReferences[i];
+                //update time when page is used
+                recentlyUsed[allocatedLocation] = clock();
 
-                    //increase nextFrameIndex in a circular way
-                    nextFrameIndex = (nextFrameIndex + 1) % numAllocatedFrames;
-
-                    printOutput(false , pageReferences[i] , allocationArray ,numAllocatedFrames);
-                }else{
-                    //signal a page fault
-                    //get page from virtual memory
-                    //allocate page to frame
-                    allocationArray[nextFrameIndex] = pageReferences[i];
-
-                    //increase nextFrameIndex in a circular way
-                    nextFrameIndex = (nextFrameIndex + 1) % numAllocatedFrames;
-
-                    numPageFaults++;
-
-                    printOutput(true , pageReferences[i] , allocationArray ,numAllocatedFrames);
-                }
+                printOutput(false, pageReferences[i], residentSet, residentSetSize);
 
             }
+        }
+        i++;
         
+    }
+
+    //resident set is full (begin replacing pages)
+    while (pageReferences[i] != -1){ // not end of input
+
+        //checks if the page exists in resident set if so return it's location
+        int location = getPageResidentSetIndex(pageReferences[i], residentSet, residentSetSize);
+
+        //page exist
+        if (location != -1){
+
+            //update time when page is used
+            recentlyUsed[location] = clock();
+
+            //page exists no fault occurred
+            printOutput(false, pageReferences[i], residentSet, residentSetSize);
+
+        }else{
+            
+            //signal a page fault
+            //get page from virtual memory
+
+            //choose lru page to replace
+            int lruPageIndex = getLRUpageIndex(recentlyUsed, residentSetSize);
+
+            //replace with new page
+            residentSet[lruPageIndex] = pageReferences[i];
+
+            //update time for the new page
+            recentlyUsed[lruPageIndex] = clock();
+
+            //increase page fault count
+            numPageFaults++;
+
+            printOutput(true, pageReferences[i], residentSet, residentSetSize);
+            
+        }
 
         i++;
+    }
 
+
+    puts("-------------------------------------");
+   printf("Number of page faults = %d\n", numPageFaults);
+}
+
+void fifoPolicy(int *pageReferences, int *residentSet, int residentSetSize){
+    puts("Replacement Policy = FIFO");
+    puts("-------------------------------------");
+    puts("Page\tContent of Frames");
+    puts("----\t-----------------");
+
+    int fifoFrameToReplace = 0; //to keeptrack of the frame that will be chosen next for replacement
+    int numPageFaults = 0; //count number of page faults excluding ones when resident set is not yet full
+
+
+    //serve page references
+    int i = 0 , numFreeFrames = residentSetSize;
+
+    //page faults when process pages are first loaded don't count
+    while(pageReferences[i] != -1 && numFreeFrames != 0){
+
+
+
+        //page exists
+        if(getPageResidentSetIndex(pageReferences[i], residentSet, residentSetSize) != -1){
+            printOutput(false, pageReferences[i], residentSet, residentSetSize);
+        }else{
+            //page doesn't exist
+            //load it into a free frame and don't increase fault count
+            if(loadIfNotFull(pageReferences[i] , residentSet , residentSetSize) != -1){
+                //decrease free frames
+                numFreeFrames--;
+
+                //increase fifoFrameToReplace in a circular way
+                fifoFrameToReplace = (fifoFrameToReplace + 1) % residentSetSize;
+
+                printOutput(false, pageReferences[i], residentSet, residentSetSize);
+
+            }
+        }
+        i++;
+        
+    }
+
+    //resident set is full (begin replacing pages)
+    while (pageReferences[i] != -1){ // not end of input
+
+        if (getPageResidentSetIndex(pageReferences[i], residentSet, residentSetSize) != -1){
+
+            //page exists no fault occurred
+            printOutput(false, pageReferences[i],residentSet, residentSetSize);
+
+        }else{
+            
+            //signal a page fault
+            //get page from virtual memory
+            //allocate page to frame
+            residentSet[fifoFrameToReplace] = pageReferences[i];
+
+            //increase fifoFrameToReplace in a circular way
+            fifoFrameToReplace = (fifoFrameToReplace + 1) % residentSetSize;
+
+            //increase page fault count
+            numPageFaults++;
+
+            printOutput(true, pageReferences[i], residentSet, residentSetSize);
+            
+        }
+
+        i++;
     }
 
     puts("-------------------------------------");
-    printf("Number of page faults = %d\n",numPageFaults);
-
+    printf("Number of page faults = %d\n", numPageFaults);
 }
 
-bool pageExists(int pageReference, int *allocationArray, int numAllocatedFrames) {
+/**
+ * checks weather the referenced page exists in resident set or not
+ * and returns it's location
+ * */
+int getPageResidentSetIndex(int pageReference, int *residentSet, int residentSetSize){
 
-    for (int i = 0; i < numAllocatedFrames; i++) {
-        if (allocationArray[i] == pageReference)
-            return true;
+    int i = 0;
+    while(i < residentSetSize && residentSet[i] != -1){
+        if (residentSet[i] == pageReference)
+            return i;
+        i++;
     }
-    return false;
+    return -1;
 }
 
-void printOutput(bool pageFault, int pageReference, int *allocationArray, int numAllocatedFrames) {
+/**
+ * prints the current state of resident set after a page reference has occurred
+ * */
+void printOutput(bool pageFault, int pageReference, int *residentSet, int residentSetSize){
 
     if (pageFault)
         printf("%02d F\t", pageReference);
     else
         printf("%02d\t", pageReference);
 
-    for (int i = 0; i < numAllocatedFrames; i++) {
-        if (allocationArray[i] == -1)
+    for (int i = 0; i < residentSetSize; i++){
+        if (residentSet[i] == -1)
             printf("   ");
         else
-            printf("%02d ", allocationArray[i]);
+            printf("%02d ", residentSet[i]);
     }
 
     printf("\n");
+}
+
+/**
+ * loads process page if the resident set is not yet full
+ * and returns it's location
+ * */
+int loadIfNotFull(int page , int *residentSet , int residentSetSize){
+
+    for(int i = 0; i < residentSetSize; i++){
+        if(residentSet[i] == -1){ //empty frame
+            residentSet[i] = page; //assign frame to page
+            return i;
+        }
+    
+    }
+    return -1;
+}
+
+
+int getLRUpageIndex(clock_t *recentlyUsed , int residentSetSize){
+    clock_t min = recentlyUsed[0];
+    int lruLocation = 0;
+
+    for(int i = 1 ; i < residentSetSize ; i++){
+        if(recentlyUsed[i] < min){
+            min = recentlyUsed[i];
+            lruLocation = i;
+        }
+    }
+
+    return lruLocation;
 }
