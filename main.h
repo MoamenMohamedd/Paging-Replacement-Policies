@@ -18,4 +18,6 @@ void printOutput(bool pageFault, int pageReference, int *residentSet, int reside
 
 int getLRUpageIndex(clock_t *recentlyUsed , int residentSetSize);
 
+int getRepPageClock(int pointer , bool* use , int residentSetSize);
+
 #endif //PAGINGANDREPLACEMENT_MAIN_H
